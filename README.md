@@ -80,3 +80,13 @@ All list endpoints support extension for global filters (`date_start`, `date_end
 - Timezone for UI/business semantics: America/New_York.
 - Optional external APIs are disabled by default.
 - Designed so DuckDB can be swapped for Postgres with SQLAlchemy-compatible repository layer.
+
+
+## Frontend Docker Build Troubleshooting
+If `docker compose build frontend` fails at `npm run build`, make sure you have the latest changes that avoid build-time API coupling and relax build gating for lint/type checks in container builds.
+
+Then rebuild without cache:
+```bash
+docker compose build --no-cache frontend
+docker compose up -d
+```

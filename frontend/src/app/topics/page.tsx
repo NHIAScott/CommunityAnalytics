@@ -1,6 +1,5 @@
-import { fetchApi } from '@/lib/api';
+import JsonView from '@/components/JsonView';
 
-export default async function TopicsPage() {
-  const data = await fetchApi<any[]>('/api/topics');
-  return <div><h2>Discussion & Topic Intelligence</h2><pre>{JSON.stringify(data, null, 2)}</pre></div>;
+export default function TopicsPage() {
+  return <JsonView path='/api/topics' title='Discussion & Topic Intelligence' />;
 }

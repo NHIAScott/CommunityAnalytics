@@ -1,6 +1,5 @@
-import { fetchApi } from '@/lib/api';
+import JsonView from '@/components/JsonView';
 
-export default async function OverviewPage() {
-  const data = await fetchApi<any>('/api/overview');
-  return <div><h2>Executive Overview</h2><pre>{JSON.stringify(data, null, 2)}</pre></div>;
+export default function OverviewPage() {
+  return <JsonView path='/api/overview' title='Executive Overview' />;
 }

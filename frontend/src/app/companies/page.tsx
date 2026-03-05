@@ -1,6 +1,5 @@
-import { fetchApi } from '@/lib/api';
+import JsonView from '@/components/JsonView';
 
-export default async function CompaniesPage() {
-  const data = await fetchApi<any[]>('/api/companies');
-  return <div><h2>Company Engagement & Health</h2><pre>{JSON.stringify(data, null, 2)}</pre></div>;
+export default function CompaniesPage() {
+  return <JsonView path='/api/companies' title='Company Engagement & Health' />;
 }
