@@ -14,7 +14,7 @@ export default function TopicsPage() {
           <SimpleBarList title='Most Influential Topics' data={rows} labelKey='topic_label' valueKey='influence_score' />
           <DataTable columns={['topic_id', 'topic_label', 'threads', 'replies', 'influence_score', 'top_keywords_json']} rows={rows.slice(0, 100)} />
         </>
-      ) : null}
+      ) : <p>No data available for current ingestion/filter.</p>}
     </SectionFrame>
   );
 }

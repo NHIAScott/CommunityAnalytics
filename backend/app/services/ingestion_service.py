@@ -15,22 +15,61 @@ from app.core.settings import settings
 from app.etl.mappers import canonicalize_company, detect_dataset, normalize_col
 
 
+def _clean(v: object) -> str | None:
+    if v is None:
+        return None
+    txt = str(v).strip()
+    if txt == "" or txt.lower() in {"nan", "none", "null"}:
+        return None
+    return txt
+
+
+def _to_bool(v: object, default: bool = False) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    txt = str(v).strip().lower()
+    if txt in {"1", "true", "yes", "y", "t"}:
+        return True
+    if txt in {"0", "false", "no", "n", "f"}:
+        return False
+    return default
+
+
+def _to_int(v: object) -> int:
+    if v is None:
+        return 0
+    try:
+        if pd.isna(v):
+            return 0
+    except Exception:
+        pass
+    try:
+        return int(float(v))
+    except Exception:
+        return 0
+
+
 def _user_key(df: pd.DataFrame) -> pd.Series:
+    keys = pd.Series([None] * len(df), index=df.index, dtype="object")
+
     for col in ["integration_id", "contact_key", "email"]:
         if col in df.columns:
-            v = df[col].astype(str).str.strip()
-            if v.notna().any():
-                return v
-    return (
+            vals = df[col].apply(_clean)
+            keys = keys.where(keys.notna(), vals)
+
+    fallback = (
         df.get("first_name", "").astype(str)
         + "|"
         + df.get("last_name", "").astype(str)
         + "|"
         + df.get("company_name", "").astype(str)
     ).apply(lambda x: hashlib.md5(x.encode()).hexdigest())
+    return keys.fillna(fallback).astype(str)
 
 
-def ingest_uploads(files: list[UploadFile], db: Session) -> list[dict]:
+def ingest_uploads(files: list[UploadFile], db: Session, force: bool = False) -> list[dict]:
     results: list[dict] = []
     raw_dir = Path(settings.raw_upload_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -39,7 +78,7 @@ def ingest_uploads(files: list[UploadFile], db: Session) -> list[dict]:
         content = file.file.read()
         file_hash = hashlib.sha256(content).hexdigest()
         existing = db.execute(text("SELECT 1 FROM ingestion_log WHERE file_hash=:h"), {"h": file_hash}).first()
-        if existing:
+        if existing and not force:
             results.append({"file": file.filename, "status": "duplicate_skipped"})
             continue
 
@@ -75,7 +114,13 @@ def ingest_uploads(files: list[UploadFile], db: Session) -> list[dict]:
                 _insert_friend_requests(df.copy(), ingestion_id, db)
                 rows += len(df)
             elif dataset == "logged_in_since_2024":
-                _insert_login_flags(df.copy(), ingestion_id, db)
+                u = df.copy()
+                u["user_id"] = _user_key(u)
+                if "company_name" in u.columns:
+                    u["company_name"] = u["company_name"].astype(str)
+                    u["company_canonical"] = u["company_name"].apply(canonicalize_company)
+                _upsert_users(u, db)
+                _insert_login_flags(u, ingestion_id, db)
                 rows += len(df)
             else:
                 errors.append(f"Unknown or unsupported sheet in {file.filename}")
@@ -106,14 +151,16 @@ def ingest_uploads(files: list[UploadFile], db: Session) -> list[dict]:
 
 def _upsert_users(df: pd.DataFrame, db: Session) -> None:
     for _, row in df.iterrows():
-        company_id = hashlib.md5(str(row.get("company_canonical", "unknown")).encode()).hexdigest()[:12]
+        company_raw = _clean(row.get("company_name")) or "unknown"
+        company_canonical = canonicalize_company(_clean(row.get("company_canonical")) or company_raw)
+        company_id = hashlib.md5(company_canonical.encode()).hexdigest()[:12]
         db.execute(
             text("INSERT OR IGNORE INTO dim_company (company_id, company_name_canonical) VALUES (:id,:n)"),
-            {"id": company_id, "n": row.get("company_canonical", "unknown")},
+            {"id": company_id, "n": company_canonical},
         )
         db.execute(
             text("INSERT INTO dim_company_variant (company_id, company_name_raw) VALUES (:id,:raw)"),
-            {"id": company_id, "raw": row.get("company_name", "")},
+            {"id": company_id, "raw": company_raw},
         )
         db.execute(
             text(
@@ -127,24 +174,24 @@ def _upsert_users(df: pd.DataFrame, db: Session) -> None:
                 """
             ),
             {
-                "user_id": row.get("user_id"),
-                "contact_key": row.get("contact_key"),
-                "first_name": row.get("first_name"),
-                "last_name": row.get("last_name"),
-                "email": row.get("email"),
-                "company_name_raw": row.get("company_name"),
+                "user_id": _clean(row.get("user_id")),
+                "contact_key": _clean(row.get("contact_key")),
+                "first_name": _clean(row.get("first_name")),
+                "last_name": _clean(row.get("last_name")),
+                "email": _clean(row.get("email")),
+                "company_name_raw": company_raw,
                 "company_id": company_id,
-                "member_status": row.get("member_status"),
-                "user_status": row.get("user_status"),
-                "state": row.get("state"),
-                "country": row.get("country"),
-                "has_photo": bool(row.get("has_photo", False)),
-                "has_bio": bool(row.get("has_bio", False)),
-                "has_education": bool(row.get("has_education", False)),
-                "has_job_history": bool(row.get("has_job_history", False)),
-                "mentor_status": bool(row.get("mentor_status", False)),
-                "mentee_status": bool(row.get("mentee_status", False)),
-                "volunteer_status": bool(row.get("volunteer_status", False)),
+                "member_status": _clean(row.get("member_status")),
+                "user_status": _clean(row.get("user_status")),
+                "state": _clean(row.get("state")),
+                "country": _clean(row.get("country")),
+                "has_photo": _to_bool(row.get("has_photo"), False),
+                "has_bio": _to_bool(row.get("has_bio"), False),
+                "has_education": _to_bool(row.get("has_education"), False),
+                "has_job_history": _to_bool(row.get("has_job_history"), False),
+                "mentor_status": _to_bool(row.get("mentor_status"), False),
+                "mentee_status": _to_bool(row.get("mentee_status"), False),
+                "volunteer_status": _to_bool(row.get("volunteer_status"), False),
                 "last_seen_at": datetime.utcnow(),
             },
         )
@@ -166,20 +213,20 @@ def _insert_user_snapshot(df: pd.DataFrame, ingestion_id: str, db: Session) -> N
             ),
             {
                 "d": now,
-                "user_id": row.get("user_id"),
-                "logins": int(row.get("logins", 0) or 0),
-                "downloads": int(row.get("downloads", 0) or 0),
-                "documents_created": int(row.get("documents_created", 0) or 0),
-                "threads_created": int(row.get("threads_created", 0) or 0),
-                "discussion_replies": int(row.get("discussion_replies", 0) or 0),
-                "replies_to_sender": int(row.get("replies_to_sender", 0) or 0),
-                "blogs_created": int(row.get("blogs_created", 0) or 0),
-                "questions_created": int(row.get("questions_created", 0) or 0),
-                "answers_created": int(row.get("answers_created", 0) or 0),
-                "bad": int(row.get("best_answers_discussion", 0) or 0),
-                "baq": int(row.get("best_answers_qa", 0) or 0),
-                "rec": int(row.get("recommends_given", 0) or 0),
-                "f": int(row.get("follows", 0) or 0),
+                "user_id": _clean(row.get("user_id")),
+                "logins": _to_int(row.get("logins")),
+                "downloads": _to_int(row.get("downloads")),
+                "documents_created": _to_int(row.get("documents_created")),
+                "threads_created": _to_int(row.get("threads_created")),
+                "discussion_replies": _to_int(row.get("discussion_replies")),
+                "replies_to_sender": _to_int(row.get("replies_to_sender")),
+                "blogs_created": _to_int(row.get("blogs_created")),
+                "questions_created": _to_int(row.get("questions_created")),
+                "answers_created": _to_int(row.get("answers_created")),
+                "bad": _to_int(row.get("best_answers_discussion")),
+                "baq": _to_int(row.get("best_answers_qa")),
+                "rec": _to_int(row.get("recommends_given")),
+                "f": _to_int(row.get("follows")),
                 "src": ingestion_id,
             },
         )
@@ -208,11 +255,11 @@ def _insert_threads(df: pd.DataFrame, ingestion_id: str, db: Session) -> None:
                 "ca": row.get("created_at"),
                 "cl": row.get("closed_at"),
                 "au": row.get("author_user_id") or row.get("author"),
-                "tr": int(row.get("total_replies", 0) or 0),
-                "rtt": int(row.get("replies_to_thread", 0) or 0),
-                "rts": int(row.get("replies_to_sender", 0) or 0),
-                "trec": int(row.get("total_recommends", 0) or 0),
-                "tf": int(row.get("total_following", 0) or 0),
+                "tr": _to_int(row.get("total_replies")),
+                "rtt": _to_int(row.get("replies_to_thread")),
+                "rts": _to_int(row.get("replies_to_sender")),
+                "trec": _to_int(row.get("total_recommends")),
+                "tf": _to_int(row.get("total_following")),
                 "src": ingestion_id,
             },
         )
@@ -228,9 +275,9 @@ def _insert_friend_requests(df: pd.DataFrame, ingestion_id: str, db: Session) ->
                 """
             ),
             {
-                "r": row.get("requester_user_id") or row.get("requester"),
-                "q": row.get("requested_user_id") or row.get("requested"),
-                "s": row.get("request_status", "unknown"),
+                "r": _clean(row.get("requester_user_id") or row.get("requester")),
+                "q": _clean(row.get("requested_user_id") or row.get("requested")),
+                "s": _clean(row.get("request_status")) or "unknown",
                 "d": row.get("request_date"),
                 "src": ingestion_id,
             },
@@ -239,7 +286,7 @@ def _insert_friend_requests(df: pd.DataFrame, ingestion_id: str, db: Session) ->
 
 def _insert_login_flags(df: pd.DataFrame, ingestion_id: str, db: Session) -> None:
     for _, row in df.iterrows():
-        uid = row.get("integration_id") or row.get("contact_key") or row.get("email")
+        uid = _clean(row.get("user_id") or row.get("integration_id") or row.get("contact_key") or row.get("email"))
         if not uid:
             continue
         db.execute(
@@ -250,8 +297,8 @@ def _insert_login_flags(df: pd.DataFrame, ingestion_id: str, db: Session) -> Non
                 """
             ),
             {
-                "u": str(uid),
-                "f": bool(row.get("logged_in_since_2024", True)),
+                "u": uid,
+                "f": _to_bool(row.get("logged_in_since_2024"), True),
                 "d": row.get("last_login_date"),
                 "src": ingestion_id,
             },

@@ -14,7 +14,7 @@ export default function CompaniesPage() {
           <SimpleBarList title='Top Companies by Health Score' data={rows} labelKey='company_name_canonical' valueKey='company_health_score_0_100' />
           <DataTable columns={['company_name_canonical', 'company_health_score_0_100', 'active_users', 'engaged_users', 'risk_flags_json']} rows={rows.slice(0, 100)} />
         </>
-      ) : null}
+      ) : <p>No data available for current ingestion/filter.</p>}
     </SectionFrame>
   );
 }

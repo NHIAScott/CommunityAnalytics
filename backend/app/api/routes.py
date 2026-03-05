@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -16,10 +16,10 @@ def list_ingestions(db: Session = Depends(get_db)):
 
 
 @router.post("/ingestions")
-def upload_ingestions(background: BackgroundTasks, files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
-    result = ingest_uploads(files, db)
-    background.add_task(run_materializations, db)
-    return {"result": result}
+def upload_ingestions(files: list[UploadFile] = File(...), force: bool = False, db: Session = Depends(get_db)):
+    result = ingest_uploads(files, db, force=force)
+    materialization = run_materializations(db)
+    return {"result": result, "materialization": materialization}
 
 
 @router.get("/overview")
@@ -28,7 +28,7 @@ def overview(db: Session = Depends(get_db)):
         text(
             """
             SELECT
-              (SELECT COUNT(*) FROM dim_user) total_members,
+              (SELECT COALESCE(COUNT(DISTINCT user_id),0) FROM fact_login_flag WHERE logged_in_since_2024 = true) total_members,
               (SELECT COUNT(DISTINCT user_id) FROM fact_user_activity_snapshot WHERE logins>0) active_users,
               (SELECT COUNT(DISTINCT user_id) FROM fact_user_activity_snapshot WHERE (logins+downloads+discussion_replies+threads_created+blogs_created)>0) engaged_users,
               (SELECT COUNT(DISTINCT user_id) FROM fact_user_activity_snapshot WHERE (threads_created+blogs_created)>0) contributors,
@@ -44,7 +44,7 @@ def overview(db: Session = Depends(get_db)):
 
 @router.get("/users")
 def users(db: Session = Depends(get_db), company_id: str | None = None, tier: str | None = None):
-    q = "SELECT u.user_id, u.first_name, u.last_name, u.company_id, s.engagement_score_0_100, s.super_user_score_0_100, s.engagement_tier FROM dim_user u LEFT JOIN mart_user_scores_period s ON s.user_id=u.user_id WHERE 1=1"
+    q = "SELECT u.user_id, u.first_name, u.last_name, u.company_id, COALESCE(s.engagement_score_0_100,0) engagement_score_0_100, COALESCE(s.super_user_score_0_100,0) super_user_score_0_100, COALESCE(s.engagement_tier,'Observer') engagement_tier FROM dim_user u LEFT JOIN mart_user_scores_period s ON s.user_id=u.user_id WHERE 1=1"
     params = {}
     if company_id:
         q += " AND u.company_id=:company_id"
@@ -58,7 +58,7 @@ def users(db: Session = Depends(get_db), company_id: str | None = None, tier: st
 
 @router.get("/companies")
 def companies(db: Session = Depends(get_db)):
-    rows = db.execute(text("SELECT c.company_id, c.company_name_canonical, h.company_health_score_0_100, h.active_users, h.engaged_users, h.risk_flags_json FROM dim_company c LEFT JOIN mart_company_health_period h ON c.company_id=h.company_id ORDER BY h.company_health_score_0_100 DESC NULLS LAST")).mappings().all()
+    rows = db.execute(text("SELECT c.company_id, c.company_name_canonical, COALESCE(h.company_health_score_0_100,0) company_health_score_0_100, COALESCE(h.active_users,0) active_users, COALESCE(h.engaged_users,0) engaged_users, COALESCE(h.risk_flags_json,'[]') risk_flags_json FROM dim_company c LEFT JOIN mart_company_health_period h ON c.company_id=h.company_id ORDER BY company_health_score_0_100 DESC")).mappings().all()
     return [dict(r) for r in rows]
 
 

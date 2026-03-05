@@ -14,7 +14,7 @@ export default function UsersPage() {
           <SimpleBarList title='Top Users by Engagement Score' data={rows} labelKey='user_id' valueKey='engagement_score_0_100' />
           <DataTable columns={['user_id', 'first_name', 'last_name', 'company_id', 'engagement_score_0_100', 'super_user_score_0_100', 'engagement_tier']} rows={rows.slice(0, 100)} />
         </>
-      ) : null}
+      ) : <p>No data available for current ingestion/filter.</p>}
     </SectionFrame>
   );
 }

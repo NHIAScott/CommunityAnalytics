@@ -50,11 +50,18 @@ def run_materializations(db: Session, config_path: str = "backend/config/scoring
     users = pd.read_sql(
         text(
             """
-            SELECT period_start_date, user_id, COALESCE(logins,0) logins, COALESCE(downloads,0) downloads,
-              COALESCE(discussion_replies,0) discussion_replies, COALESCE(threads_created,0) threads_created,
-              COALESCE(blogs_created,0) blogs_created,
-              COALESCE(best_answers_discussion,0)+COALESCE(best_answers_qa,0) best_answers
-            FROM fact_user_activity_snapshot
+            SELECT
+              current_date as period_start_date,
+              u.user_id,
+              COALESCE(SUM(s.logins),0) logins,
+              COALESCE(SUM(s.downloads),0) downloads,
+              COALESCE(SUM(s.discussion_replies),0) discussion_replies,
+              COALESCE(SUM(s.threads_created),0) threads_created,
+              COALESCE(SUM(s.blogs_created),0) blogs_created,
+              COALESCE(SUM(s.best_answers_discussion),0)+COALESCE(SUM(s.best_answers_qa),0) best_answers
+            FROM dim_user u
+            LEFT JOIN fact_user_activity_snapshot s ON s.user_id = u.user_id
+            GROUP BY u.user_id
             """
         ),
         db.bind,
@@ -170,11 +177,11 @@ def _build_company_health(db: Session) -> None:
             INSERT INTO mart_company_health_period
             SELECT
               current_date, 'week', u.company_id,
-              100.0 * (COUNT(DISTINCT CASE WHEN s.logins > 0 THEN u.user_id END)::DOUBLE / NULLIF(COUNT(DISTINCT u.user_id),0)) as score,
-              COUNT(DISTINCT CASE WHEN s.logins > 0 THEN u.user_id END) as active_users,
-              COUNT(DISTINCT CASE WHEN (s.logins+s.downloads+s.discussion_replies+s.threads_created+s.blogs_created) > 0 THEN u.user_id END) engaged_users,
-              COUNT(DISTINCT CASE WHEN (s.threads_created+s.blogs_created) > 0 THEN u.user_id END) contributors,
-              SUM(s.threads_created), SUM(s.discussion_replies), SUM(s.downloads),
+              COALESCE(100.0 * (COUNT(DISTINCT CASE WHEN COALESCE(s.logins,0) > 0 THEN u.user_id END)::DOUBLE / NULLIF(COUNT(DISTINCT u.user_id),0)),0) as score,
+              COUNT(DISTINCT CASE WHEN COALESCE(s.logins,0) > 0 THEN u.user_id END) as active_users,
+              COUNT(DISTINCT CASE WHEN (COALESCE(s.logins,0)+COALESCE(s.downloads,0)+COALESCE(s.discussion_replies,0)+COALESCE(s.threads_created,0)+COALESCE(s.blogs_created,0)) > 0 THEN u.user_id END) engaged_users,
+              COUNT(DISTINCT CASE WHEN (COALESCE(s.threads_created,0)+COALESCE(s.blogs_created,0)) > 0 THEN u.user_id END) contributors,
+              COALESCE(SUM(s.threads_created),0), COALESCE(SUM(s.discussion_replies),0), COALESCE(SUM(s.downloads),0),
               0, '[]'
             FROM dim_user u
             LEFT JOIN fact_user_activity_snapshot s ON s.user_id = u.user_id

@@ -20,7 +20,7 @@ export default function NetworkPage() {
           <h3 style={{ marginTop: 20 }}>Network Edges (Sample)</h3>
           <DataTable columns={['from_user_id', 'to_user_id', 'weight', 'interaction_type', 'period_start_date']} rows={data.edges.slice(0, 100)} />
         </>
-      ) : null}
+      ) : <p>No network data available yet.</p>}
     </SectionFrame>
   );
 }
