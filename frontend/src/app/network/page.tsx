@@ -1,5 +1,6 @@
-import JsonView from '@/components/JsonView';
+import { fetchApi } from '@/lib/api';
 
-export default function NetworkPage() {
-  return <JsonView path='/api/network' title='Knowledge Network' />;
+export default async function NetworkPage() {
+  const data = await fetchApi<any>('/api/network');
+  return <div><h2>Knowledge Network</h2><pre>{JSON.stringify(data, null, 2)}</pre></div>;
 }
