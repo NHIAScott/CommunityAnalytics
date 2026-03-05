@@ -1,0 +1,28 @@
+engagement_weights:
+  logins: 1
+  downloads: 2
+  discussion_replies: 4
+  threads_created: 6
+  blogs_created: 5
+  best_answers: 8
+  friend_connections: 3
+super_user_weights:
+  contribution_volume: 0.35
+  impact: 0.25
+  breadth: 0.15
+  consistency: 0.10
+  network_centrality: 0.15
+health_weights:
+  breadth: 0.25
+  depth: 0.2
+  contribution: 0.25
+  network_embed: 0.15
+  consistency: 0.15
+thresholds:
+  engagement_drop_pct: 0.2
+  champion_decline_pct: 0.2
+  isolation_threshold: 0.8
+rolling_days: 90
+topic_model:
+  min_cluster_size: 5
+  n_clusters_fallback: 8
